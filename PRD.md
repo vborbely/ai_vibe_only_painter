@@ -29,9 +29,9 @@ MVP : drawing mode with some of the tools
   - Tool selection panel as a Floating Action button: brush, circle, rectangle, line, eraser
   - Color picker always visible on the bottom
   - on the top right of the screen, in the AppBar actions: Undo/Redo, Save/Load buttons
-- Drawing details:
-  - the user can select a black-and-white line drawing and color it using the "Bucket tool"
-  - if a part of the drawing is a closed shape, the color is applied to the whole shape
+  - details on Drawing feature:
+    - the user can select a black-and-white line drawing and color it using the "Bucket tool"
+    - if a part of the drawing is a closed shape, the color is applied to the whole shape
 
 
 ## Navigation
