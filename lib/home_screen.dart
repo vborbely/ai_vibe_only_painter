@@ -139,6 +139,7 @@ class HomeScreen extends StatelessWidget {
                 Text('• Rectangle - Draw rectangles'),
                 Text('• Line - Draw straight lines'),
                 Text('• Eraser - Remove parts of drawing'),
+                Text('• Bucket - Fill closed areas with color'),
                 SizedBox(height: 16),
                 Text(
                   'Features:',

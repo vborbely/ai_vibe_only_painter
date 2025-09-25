@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
+import 'dart:typed_data';
 
-enum DrawingTool { pen, circle, rectangle, line, eraser }
+enum DrawingTool { pen, circle, rectangle, line, eraser, bucket }
 
 class DrawingPoint {
   final Offset point;
@@ -35,6 +37,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   Offset? startPoint;
   Offset? endPoint;
+
+  // Canvas image data for flood fill
+  ui.Image? _canvasImage;
+  bool _isProcessingFloodFill = false;
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +88,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 onPanStart: _onPanStart,
                 onPanUpdate: _onPanUpdate,
                 onPanEnd: _onPanEnd,
+                onTapUp: selectedTool == DrawingTool.bucket ? _onTap : null,
                 child: CustomPaint(
                   painter: DrawingPainter(
                     strokes: strokes,
@@ -97,6 +104,24 @@ class _DrawingScreenState extends State<DrawingScreen> {
               ),
             ),
           ),
+          // Processing indicator
+          if (_isProcessingFloodFill)
+            Container(
+              padding: EdgeInsets.all(8),
+              color: theme.colorScheme.surfaceVariant,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Filling area...', style: theme.textTheme.bodySmall),
+                ],
+              ),
+            ),
           // Color picker at the bottom
           Container(
             height: 80,
@@ -215,6 +240,20 @@ class _DrawingScreenState extends State<DrawingScreen> {
                   : colorScheme.onSurface,
             ),
           ),
+          SizedBox(height: 8),
+          FloatingActionButton(
+            heroTag: "bucket",
+            onPressed: () => _selectTool(DrawingTool.bucket),
+            backgroundColor: selectedTool == DrawingTool.bucket
+                ? colorScheme.primary
+                : colorScheme.surface,
+            child: Icon(
+              Icons.format_color_fill,
+              color: selectedTool == DrawingTool.bucket
+                  ? colorScheme.onPrimary
+                  : colorScheme.onSurface,
+            ),
+          ),
         ],
       ),
     );
@@ -253,7 +292,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
     });
   }
 
+  void _onTap(TapUpDetails details) {
+    if (selectedTool == DrawingTool.bucket) {
+      _performFloodFill(details.localPosition);
+    }
+  }
+
   void _onPanStart(DragStartDetails details) {
+    if (selectedTool == DrawingTool.bucket) return; // Bucket tool uses tap, not drag
+
     _saveToHistory();
     startPoint = details.localPosition;
 
@@ -264,6 +311,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
+    if (selectedTool == DrawingTool.bucket) return; // Bucket tool uses tap, not drag
+
     setState(() {
       if (selectedTool == DrawingTool.pen || selectedTool == DrawingTool.eraser) {
         _addPointToCurrentStroke(details.localPosition);
@@ -274,6 +323,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _onPanEnd(DragEndDetails details) {
+    if (selectedTool == DrawingTool.bucket) return; // Bucket tool uses tap, not drag
+
     setState(() {
       if (selectedTool == DrawingTool.pen || selectedTool == DrawingTool.eraser) {
         currentStroke.add(null); // End stroke marker
@@ -286,6 +337,137 @@ class _DrawingScreenState extends State<DrawingScreen> {
       startPoint = null;
       endPoint = null;
     });
+  }
+
+  // Flood fill implementation
+  Future<void> _performFloodFill(Offset tapPosition) async {
+    if (_isProcessingFloodFill) return;
+
+    setState(() {
+      _isProcessingFloodFill = true;
+    });
+
+    try {
+      // Create a temporary canvas to get pixel data
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+
+      // Get the canvas size from the render box
+      final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+      if (renderBox == null) return;
+
+      final size = renderBox.size;
+
+      // Draw white background
+      final backgroundPaint = Paint()..color = Colors.white;
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), backgroundPaint);
+
+      // Draw all existing strokes
+      final painter = DrawingPainter(
+        strokes: strokes,
+        currentStroke: [],
+        selectedTool: selectedTool,
+        selectedColor: selectedColor,
+        strokeWidth: strokeWidth,
+      );
+      painter.paint(canvas, size);
+
+      // Convert to image
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(size.width.toInt(), size.height.toInt());
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+
+      if (byteData == null) return;
+
+      // Perform flood fill
+      final pixels = byteData.buffer.asUint8List();
+      final width = size.width.toInt();
+      final height = size.height.toInt();
+
+      final startX = tapPosition.dx.toInt().clamp(0, width - 1);
+      final startY = tapPosition.dy.toInt().clamp(0, height - 1);
+
+      _saveToHistory();
+      await _floodFill(pixels, width, height, startX, startY, selectedColor);
+    } finally {
+      setState(() {
+        _isProcessingFloodFill = false;
+      });
+    }
+  }
+
+  Future<void> _floodFill(Uint8List pixels, int width, int height, int startX, int startY, Color fillColor) async {
+    final startIndex = (startY * width + startX) * 4;
+    if (startIndex >= pixels.length) return;
+
+    // Get the original color at the start position
+    final originalR = pixels[startIndex];
+    final originalG = pixels[startIndex + 1];
+    final originalB = pixels[startIndex + 2];
+
+    // Get fill color components
+    final fillR = fillColor.red;
+    final fillG = fillColor.green;
+    final fillB = fillColor.blue;
+
+    // If the original color is the same as fill color, return
+    if (originalR == fillR && originalG == fillG && originalB == fillB) {
+      return;
+    }
+
+    // Create filled area as stroke points
+    List<DrawingPoint?> filledArea = [];
+
+    // Use stack-based flood fill to avoid recursion depth issues
+    List<Offset> stack = [Offset(startX.toDouble(), startY.toDouble())];
+    Set<String> visited = {};
+
+    while (stack.isNotEmpty && filledArea.length < 10000) { // Limit to prevent excessive processing
+      final current = stack.removeLast();
+      final x = current.dx.toInt();
+      final y = current.dy.toInt();
+      final key = '$x,$y';
+
+      if (visited.contains(key) ||
+          x < 0 || x >= width ||
+          y < 0 || y >= height) {
+        continue;
+      }
+
+      visited.add(key);
+
+      final index = (y * width + x) * 4;
+      if (index >= pixels.length) continue;
+
+      // Check if this pixel matches the original color
+      if (pixels[index] != originalR ||
+          pixels[index + 1] != originalG ||
+          pixels[index + 2] != originalB) {
+        continue;
+      }
+
+      // Add this point to the filled area
+      filledArea.add(DrawingPoint(
+        point: Offset(x.toDouble(), y.toDouble()),
+        color: fillColor,
+        strokeWidth: 1.0,
+        tool: DrawingTool.bucket,
+      ));
+
+      // Add neighboring pixels to the stack
+      stack.add(Offset((x + 1).toDouble(), y.toDouble()));
+      stack.add(Offset((x - 1).toDouble(), y.toDouble()));
+      stack.add(Offset(x.toDouble(), (y + 1).toDouble()));
+      stack.add(Offset(x.toDouble(), (y - 1).toDouble()));
+    }
+
+    // Add the filled area to strokes if it's not empty
+    if (filledArea.isNotEmpty) {
+      filledArea.add(null); // End stroke marker
+      setState(() {
+        strokes.add(filledArea);
+      });
+    }
   }
 
   void _addPointToCurrentStroke(Offset point) {
