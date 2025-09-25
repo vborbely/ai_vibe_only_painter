@@ -10,19 +10,28 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(title: Text('Free Draw Canvas')),
-      body: GestureDetector(
-        onPanUpdate: (details) {
-          setState(() {
-            RenderBox? box = context.findRenderObject() as RenderBox?;
-            points.add(box?.globalToLocal(details.globalPosition));
-          });
-        },
-        onPanEnd: (details) => points.add(null),
-        child: CustomPaint(
-          painter: _DrawingPainter(points),
-          size: Size.infinite,
+      appBar: AppBar(
+        title: Text('Drawing Canvas'),
+        backgroundColor: theme.colorScheme.surface,
+        foregroundColor: theme.colorScheme.onSurface,
+      ),
+      body: Container(
+        color: theme.colorScheme.background,
+        child: GestureDetector(
+          onPanUpdate: (details) {
+            setState(() {
+              RenderBox? box = context.findRenderObject() as RenderBox?;
+              points.add(box?.globalToLocal(details.globalPosition));
+            });
+          },
+          onPanEnd: (details) => points.add(null),
+          child: CustomPaint(
+            painter: _DrawingPainter(points, theme.colorScheme.onBackground),
+            size: Size.infinite,
+          ),
         ),
       ),
     );
@@ -31,12 +40,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
 class _DrawingPainter extends CustomPainter {
   final List<Offset?> points;
-  _DrawingPainter(this.points);
+  final Color strokeColor;
+
+  _DrawingPainter(this.points, this.strokeColor);
 
   @override
   void paint(Canvas canvas, Size size) {
     Paint paint = Paint()
-      ..color = Colors.black
+      ..color = strokeColor
       ..strokeWidth = 3.0
       ..strokeCap = StrokeCap.round;
 

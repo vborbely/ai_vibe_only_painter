@@ -4,11 +4,12 @@ import 'drawing_screen.dart';
 class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Drawing App'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+        title: Text('Paint AI Vibe'),
       ),
       body: Center(
         child: Padding(
@@ -18,17 +19,19 @@ class HomeScreen extends StatelessWidget {
             children: [
               // Welcome message
               Text(
-                'Welcome to Drawing App',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                'Welcome to Paint AI Vibe',
+                style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: Colors.blue,
+                  color: colorScheme.primary,
                 ),
                 textAlign: TextAlign.center,
               ),
               SizedBox(height: 16),
               Text(
                 'Create amazing drawings with various tools and colors',
-                style: Theme.of(context).textTheme.bodyLarge,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: colorScheme.onSurface,
+                ),
                 textAlign: TextAlign.center,
               ),
               SizedBox(height: 48),
@@ -42,11 +45,9 @@ class HomeScreen extends StatelessWidget {
                   );
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
                   padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: Text(
@@ -61,9 +62,10 @@ class HomeScreen extends StatelessWidget {
               OutlinedButton(
                 onPressed: () => _showInstructionsDialog(context),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.blue,
-                  side: BorderSide(color: Colors.blue),
                   padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
                 child: Text('Instructions & Help'),
               ),
@@ -75,6 +77,8 @@ class HomeScreen extends StatelessWidget {
   }
 
   void _showInstructionsDialog(BuildContext context) {
+    final theme = Theme.of(context);
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -87,8 +91,11 @@ class HomeScreen extends StatelessWidget {
               children: [
                 Text(
                   'Drawing Tools:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                SizedBox(height: 8),
                 Text('• Pen - Free drawing'),
                 Text('• Circle - Draw circles'),
                 Text('• Rectangle - Draw rectangles'),
@@ -97,16 +104,22 @@ class HomeScreen extends StatelessWidget {
                 SizedBox(height: 16),
                 Text(
                   'Features:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                SizedBox(height: 8),
                 Text('• Color picker - Choose drawing colors'),
                 Text('• Undo/Redo - Navigate drawing history'),
                 Text('• Save/Load - Preserve your artwork'),
                 SizedBox(height: 16),
                 Text(
                   'Tips:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                SizedBox(height: 8),
                 Text('• Drag to draw with selected tool'),
                 Text('• Use back button to return home'),
                 Text('• Save your work before leaving'),
