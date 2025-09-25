@@ -38,8 +38,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
   Offset? startPoint;
   Offset? endPoint;
 
-  // Canvas image data for flood fill
-  ui.Image? _canvasImage;
   bool _isProcessingFloodFill = false;
 
   @override
@@ -108,7 +106,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
           if (_isProcessingFloodFill)
             Container(
               padding: EdgeInsets.all(8),
-              color: theme.colorScheme.surfaceVariant,
+              color: theme.colorScheme.surfaceContainerHighest,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -130,7 +128,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
               color: colorScheme.surface,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
+                  color: Colors.black.withValues(alpha: 0.1),
                   blurRadius: 4,
                   offset: Offset(0, -2),
                 ),
@@ -348,19 +346,23 @@ class _DrawingScreenState extends State<DrawingScreen> {
     });
 
     try {
-      // Create a temporary canvas to get pixel data
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-
       // Get the canvas size from the render box
       final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
       if (renderBox == null) return;
 
       final size = renderBox.size;
+      final canvasWidth = size.width.toInt();
+      final canvasHeight = size.height.toInt();
+
+      // Create a bitmap representation of the current drawing
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
 
       // Draw white background
-      final backgroundPaint = Paint()..color = Colors.white;
-      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), backgroundPaint);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = Colors.white,
+      );
 
       // Draw all existing strokes
       final painter = DrawingPainter(
@@ -372,23 +374,57 @@ class _DrawingScreenState extends State<DrawingScreen> {
       );
       painter.paint(canvas, size);
 
-      // Convert to image
+      // Convert to image and get pixel data
       final picture = recorder.endRecording();
-      final image = await picture.toImage(size.width.toInt(), size.height.toInt());
+      final image = await picture.toImage(canvasWidth, canvasHeight);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
 
       if (byteData == null) return;
 
-      // Perform flood fill
       final pixels = byteData.buffer.asUint8List();
-      final width = size.width.toInt();
-      final height = size.height.toInt();
+      final startX = tapPosition.dx.toInt().clamp(0, canvasWidth - 1);
+      final startY = tapPosition.dy.toInt().clamp(0, canvasHeight - 1);
 
-      final startX = tapPosition.dx.toInt().clamp(0, width - 1);
-      final startY = tapPosition.dy.toInt().clamp(0, height - 1);
+      // Get the target color (color to replace)
+      final targetColor = _getPixelColor(pixels, startX, startY, canvasWidth);
+
+      // Check if target color is same as fill color
+      if (_colorsEqual(targetColor, selectedColor)) {
+        return; // Already the same color
+      }
 
       _saveToHistory();
-      await _floodFill(pixels, width, height, startX, startY, selectedColor);
+
+      // Perform flood fill with improved algorithm
+      final filledPixels = await _improvedFloodFill(
+        pixels,
+        canvasWidth,
+        canvasHeight,
+        startX,
+        startY,
+        targetColor,
+        selectedColor
+      );
+
+      // Convert filled pixels to drawing points
+      if (filledPixels.isNotEmpty) {
+        final filledStroke = <DrawingPoint?>[];
+
+        for (final pixel in filledPixels) {
+          filledStroke.add(DrawingPoint(
+            point: Offset(pixel.dx, pixel.dy),
+            color: selectedColor,
+            strokeWidth: 1.0,
+            tool: DrawingTool.bucket,
+          ));
+        }
+
+        filledStroke.add(null); // End stroke marker
+
+        setState(() {
+          strokes.add(filledStroke);
+        });
+      }
     } finally {
       setState(() {
         _isProcessingFloodFill = false;
@@ -396,78 +432,106 @@ class _DrawingScreenState extends State<DrawingScreen> {
     }
   }
 
-  Future<void> _floodFill(Uint8List pixels, int width, int height, int startX, int startY, Color fillColor) async {
-    final startIndex = (startY * width + startX) * 4;
-    if (startIndex >= pixels.length) return;
+  Color _getPixelColor(Uint8List pixels, int x, int y, int width) {
+    final index = (y * width + x) * 4;
+    if (index + 3 >= pixels.length) return Colors.transparent;
 
-    // Get the original color at the start position
-    final originalR = pixels[startIndex];
-    final originalG = pixels[startIndex + 1];
-    final originalB = pixels[startIndex + 2];
+    return Color.fromARGB(
+      pixels[index + 3], // alpha
+      pixels[index],     // red
+      pixels[index + 1], // green
+      pixels[index + 2], // blue
+    );
+  }
 
-    // Get fill color components
-    final fillR = fillColor.red;
-    final fillG = fillColor.green;
-    final fillB = fillColor.blue;
+  bool _colorsEqual(Color a, Color b) {
+    // Use tolerance for anti-aliased edges
+    const tolerance = 30;
+    final aRed = (a.r * 255.0).round() & 0xff;
+    final aGreen = (a.g * 255.0).round() & 0xff;
+    final aBlue = (a.b * 255.0).round() & 0xff;
 
-    // If the original color is the same as fill color, return
-    if (originalR == fillR && originalG == fillG && originalB == fillB) {
-      return;
-    }
+    final bRed = (b.r * 255.0).round() & 0xff;
+    final bGreen = (b.g * 255.0).round() & 0xff;
+    final bBlue = (b.b * 255.0).round() & 0xff;
 
-    // Create filled area as stroke points
-    List<DrawingPoint?> filledArea = [];
+    return (aRed - bRed).abs() <= tolerance &&
+           (aGreen - bGreen).abs() <= tolerance &&
+           (aBlue - bBlue).abs() <= tolerance;
+  }
 
-    // Use stack-based flood fill to avoid recursion depth issues
-    List<Offset> stack = [Offset(startX.toDouble(), startY.toDouble())];
-    Set<String> visited = {};
+  Future<List<Offset>> _improvedFloodFill(
+    Uint8List pixels,
+    int width,
+    int height,
+    int startX,
+    int startY,
+    Color targetColor,
+    Color fillColor,
+  ) async {
+    final filledPixels = <Offset>[];
+    final visited = <String>{};
+    final queue = <Offset>[Offset(startX.toDouble(), startY.toDouble())];
 
-    while (stack.isNotEmpty && filledArea.length < 10000) { // Limit to prevent excessive processing
-      final current = stack.removeLast();
+    // Use scanline flood fill algorithm for better performance
+    while (queue.isNotEmpty && filledPixels.length < 50000) {
+      final current = queue.removeAt(0);
       final x = current.dx.toInt();
       final y = current.dy.toInt();
-      final key = '$x,$y';
 
-      if (visited.contains(key) ||
-          x < 0 || x >= width ||
-          y < 0 || y >= height) {
-        continue;
-      }
+      if (x < 0 || x >= width || y < 0 || y >= height) continue;
+
+      final key = '$x,$y';
+      if (visited.contains(key)) continue;
+
+      final currentColor = _getPixelColor(pixels, x, y, width);
+      if (!_colorsEqual(currentColor, targetColor)) continue;
 
       visited.add(key);
 
-      final index = (y * width + x) * 4;
-      if (index >= pixels.length) continue;
+      // Fill the current scanline
+      int leftX = x;
+      int rightX = x;
 
-      // Check if this pixel matches the original color
-      if (pixels[index] != originalR ||
-          pixels[index + 1] != originalG ||
-          pixels[index + 2] != originalB) {
-        continue;
+      // Extend to the left
+      while (leftX > 0) {
+        final leftColor = _getPixelColor(pixels, leftX - 1, y, width);
+        if (!_colorsEqual(leftColor, targetColor)) break;
+        leftX--;
       }
 
-      // Add this point to the filled area
-      filledArea.add(DrawingPoint(
-        point: Offset(x.toDouble(), y.toDouble()),
-        color: fillColor,
-        strokeWidth: 1.0,
-        tool: DrawingTool.bucket,
-      ));
+      // Extend to the right
+      while (rightX < width - 1) {
+        final rightColor = _getPixelColor(pixels, rightX + 1, y, width);
+        if (!_colorsEqual(rightColor, targetColor)) break;
+        rightX++;
+      }
 
-      // Add neighboring pixels to the stack
-      stack.add(Offset((x + 1).toDouble(), y.toDouble()));
-      stack.add(Offset((x - 1).toDouble(), y.toDouble()));
-      stack.add(Offset(x.toDouble(), (y + 1).toDouble()));
-      stack.add(Offset(x.toDouble(), (y - 1).toDouble()));
+      // Fill the scanline
+      for (int fillX = leftX; fillX <= rightX; fillX++) {
+        final fillKey = '$fillX,$y';
+        if (!visited.contains(fillKey)) {
+          visited.add(fillKey);
+          filledPixels.add(Offset(fillX.toDouble(), y.toDouble()));
+
+          // Add pixels above and below to queue
+          if (y > 0) {
+            final aboveColor = _getPixelColor(pixels, fillX, y - 1, width);
+            if (_colorsEqual(aboveColor, targetColor)) {
+              queue.add(Offset(fillX.toDouble(), (y - 1).toDouble()));
+            }
+          }
+          if (y < height - 1) {
+            final belowColor = _getPixelColor(pixels, fillX, y + 1, width);
+            if (_colorsEqual(belowColor, targetColor)) {
+              queue.add(Offset(fillX.toDouble(), (y + 1).toDouble()));
+            }
+          }
+        }
+      }
     }
 
-    // Add the filled area to strokes if it's not empty
-    if (filledArea.isNotEmpty) {
-      filledArea.add(null); // End stroke marker
-      setState(() {
-        strokes.add(filledArea);
-      });
-    }
+    return filledPixels;
   }
 
   void _addPointToCurrentStroke(Offset point) {
@@ -651,7 +715,7 @@ class DrawingPainter extends CustomPainter {
 
   void _drawPreview(Canvas canvas) {
     final paint = Paint()
-      ..color = selectedColor.withOpacity(0.5)
+      ..color = selectedColor.withValues(alpha: 0.5)
       ..strokeWidth = strokeWidth
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
